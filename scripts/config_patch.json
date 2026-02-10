@@ -1,0 +1,43 @@
+{
+    "SEED": 21,
+    "DEVICE": "cuda:0",
+    "MULTI_GPU": "True",
+    "NUM_WORKERS": 8,
+    "PIN_MEMORY": "True",
+    "LEARNING_RATE": 1e-4,
+    "NUM_EPOCHS": 100,
+    "OPTIMIZER": "torch.optim.AdamW",
+    "SCALER": "torch.cuda.amp.GradScaler()",
+    "LOSS_FN": "smp.losses.DiceLoss(mode='binary', smooth=1)",
+    "PERFORMANCE_FN": ["utils.binary_jaccard"],
+    "DATA_CLASS": "data_setup.LettuceSegDataset",
+    "IMG_DIR": "/lustre/BIF/nobackup/hsieh005/train_patch/plant_seg",
+    "LABEL_DIR": "/lustre/BIF/nobackup/hsieh005/train_patch/GT_label",
+    "TRAIN_FRAC": 0.75,
+    "KFOLD": "None",
+    "TRAIN_TRANSFORMS": [
+        "A.Rotate(limit=180, border_mode=4, p=0.5)",
+        "A.HorizontalFlip(p=0.5)",
+        "A.VerticalFlip(p=0.5)",
+        "A.RGBShift(r_shift_limit=10, g_shift_limit=10, b_shift_limit=10, p=0.5)",
+        "A.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.05, hue=0.05, p=0.5)",
+        "ToTensorV2()"
+    ],
+    "TEST_TRANSFORMS": [
+        "ToTensorV2()"
+    ],
+    "BATCH_SIZE": 32,
+    "MODEL_TYPE": "model_builder.Segmenter",
+    "MODEL_NAME": "Unet",
+    "ENCODER_NAME": "mit_b3",
+    "ENCODER_WEIGHTS": "imagenet",
+    "N_CHANNELS": 3,
+    "N_CLASSES": 1,
+    "DECODER_ATTENTION": "None",
+    "ENCODER_FREEZE": "False",
+    "CHECKPOINT_FREQ": 5,
+    "SAVE_MODEL_DIR": "/lustre/BIF/nobackup/hsieh005/train_patch/tb_UnetMit-b3_lr1e-4_Reduce_Ldice_patch_p7_ep100_stop",
+    "SAVE_MODEL_NAME": "tb_UnetMit-b3_lr1e-4_Reduce_Ldice_patch_p7_ep100_stop.pth.tar",
+    "LOAD_MODEL": "True",
+    "LOAD_MODEL_PATH": "/lustre/BIF/nobackup/hsieh005/fine-tuning/tb_UnetMit-b3_lr1e-4_b32_Ldice_ep100.pth.tar"
+}
