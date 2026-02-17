@@ -1,0 +1,1092 @@
+---
+title: "thesis"
+author: "Mic"
+date: "2025-12-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggdist)
+library(patchwork)
+library(tibble)
+library(pheatmap)
+library(grid)
+library(data.table)
+library(viridis)
+library(scales)
+```
+
+# Improved Tipburn Segmentation through Fine-tuning 
+## Figure 7
+```{r}
+plant_seg <- read.csv("metrics_plant_seg.csv", sep = ",", header = TRUE)
+plant_background <- read.csv("metrics_bg_true.csv", sep = ",", header = TRUE)
+plant_dilation <- read.csv("metrics_dila2.csv", sep = ",", header = TRUE)
+
+trainset <- read.table("train_list.txt", header = FALSE)
+testset <- read.table("test_list.txt", header = FALSE)
+
+# remove average
+plant_seg <- plant_seg[1:60,]
+plant_background <- plant_background[1:60,]
+plant_dilation <- plant_dilation[1:60,]
+
+# add group label
+plant_seg$group <- "plant_seg"
+plant_background$group <- "plant_background"
+plant_dilation$group <- "plant_dilation"
+
+# split the train and test
+plant_seg_train <- plant_seg %>%
+  filter(filename %in% trainset$V1)
+plant_seg_test <- plant_seg %>%
+  filter(filename %in% testset$V1)
+
+plant_background_train <- plant_background %>%
+  filter(filename %in% trainset$V1)
+plant_background_test <- plant_background %>%
+  filter(filename %in% testset$V1)
+
+plant_dilation_train <- plant_dilation %>%
+  filter(filename %in% trainset$V1)
+plant_dilation_test <- plant_dilation %>%
+  filter(filename %in% testset$V1)
+
+# convert format
+model_metric_train <- bind_rows(plant_seg_train, plant_background_train, plant_dilation_train) %>%
+  pivot_longer(
+    cols = c(precision, recall, iou, dice),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+
+model_metric_train$data <- "training set"
+
+model_metric_test <- bind_rows(plant_seg_test, plant_background_test, plant_dilation_test) %>%
+  pivot_longer(
+    cols = c(precision, recall, iou, dice),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+
+model_metric_test$data <- "test set"
+
+model_metric <- rbind(model_metric_train, model_metric_test)
+model_metric$data <- factor(
+  model_metric$data,
+  levels = c("training set", "test set")
+)
+
+# box plot
+ggplot(model_metric, aes(x = Metric, y = Value, color = group)) +
+  geom_boxplot(width = 0.5, position = position_dodge(width = 0.8)) +
+  facet_wrap(~data) +
+  theme_minimal() +
+  theme(
+    panel.spacing = unit(1.2, "lines"),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8)
+  )
+  
+```
+
+## Figure 8
+```{r}
+# compare dila and patch model
+dila <- read.csv("metrics_dila_3rounds.csv", sep = ",", header = TRUE)
+patch <- read.csv("metrics_patch_lr1e-4_p7_ep100.csv", sep = ",", header = TRUE)
+
+trainset <- read.table("train_list_3rounds.txt", header = FALSE)
+testset <- read.table("test_list_3rounds.txt", header = FALSE)
+
+# remove average
+dila <- dila[1:180,]
+patch <- patch[1:180,]
+
+# add group label
+dila$model <- "resize-based"
+patch$model <- "patch-based"
+
+# split the train and test
+dila_train <- dila %>%
+  filter(filename %in% trainset$V1)
+dila_test <- dila %>%
+  filter(filename %in% testset$V1)
+
+patch_train <- patch %>%
+  filter(filename %in% trainset$V1)
+patch_test <- patch %>%
+  filter(filename %in% testset$V1)
+
+# convert format
+model_metric_train <- bind_rows(dila_train, patch_train) %>%
+  pivot_longer(
+    cols = c(precision, recall, iou, dice),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+
+model_metric_test <- bind_rows(dila_test, patch_test)  %>%
+  pivot_longer(
+    cols = c(precision, recall, iou, dice),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+
+model_metric_train$data <- "training set"
+model_metric_test$data <- "test set"
+
+model_metric <- rbind(model_metric_train, model_metric_test)
+model_metric$data <- factor(
+  model_metric$data,
+  levels = c("training set", "test set")
+)
+
+ggplot(model_metric, aes(x = Metric, y = Value, color = model)) +
+  geom_boxplot(width = 0.5, position = position_dodge(width = 0.8)) +
+  facet_wrap(~data) +
+  theme_minimal() +
+  theme(
+    panel.spacing = unit(1.2, "lines"),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8)
+  )
+```
+
+
+## Figure 10
+```{r}
+k_1 <- read.csv("results_tb_UnetMit-b3_lr1e-4_Ldice_patch_p7_ep100_fold1.tsv", sep = "\t", header = TRUE)
+k_2 <- read.csv("results_tb_UnetMit-b3_lr1e-4_Ldice_patch_p7_ep100_fold2.tsv", sep = "\t", header = TRUE)
+k_3 <- read.csv("results_tb_UnetMit-b3_lr1e-4_Ldice_patch_p7_ep100_fold3.tsv", sep = "\t", header = TRUE)
+
+k_1$train_perform <- as.numeric(str_extract(k_1$train_perform, "\\d+\\.\\d+"))
+k_1$test_perform <- as.numeric(str_extract(k_1$test_perform, "\\d+\\.\\d+"))
+
+k_2$train_perform <- as.numeric(str_extract(k_2$train_perform, "\\d+\\.\\d+"))
+k_2$test_perform <- as.numeric(str_extract(k_2$test_perform, "\\d+\\.\\d+"))
+
+k_3$train_perform <- as.numeric(str_extract(k_3$train_perform, "\\d+\\.\\d+"))
+k_3$test_perform <- as.numeric(str_extract(k_3$test_perform, "\\d+\\.\\d+"))
+
+# assign group
+k_1$Fold <- "Fold 1"
+k_2$Fold <- "Fold 2"
+k_3$Fold <- "Fold 3"
+k_all <- rbind(k_1, k_2, k_3)
+
+k_train <- k_all[c(1, 2, 3, 6)]
+k_test <- k_all[c(1, 4, 5, 6)]
+
+k_train <- k_train %>%
+  rename(Dice_loss = train_loss,
+         IoU = train_perform)
+k_train$data <- "training set"
+
+k_test <- k_test %>%
+  rename(Dice_loss = test_loss,
+         IoU = test_perform)
+k_test$data <- "test set"
+
+k_both <- rbind(k_train, k_test)
+k_both$data <- factor(
+  k_both$data,
+  levels = c("training set", "test set")
+)
+
+k_both_r <- k_both %>%
+  pivot_longer(
+    cols = c(Dice_loss, IoU),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+
+ggplot(k_both_r, aes(x = epoch, y = Value, color = Fold)) +
+  geom_line(linewidth = 0.6) +
+  facet_grid(Metric ~ data, scales = "fixed") +
+  scale_x_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, by = 20),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, by = 0.25),
+    expand = c(0, 0)
+  ) +
+  labs(x = "Epoch") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.spacing = unit(1.2, "lines"),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8),
+    panel.grid.minor = element_blank(),
+    legend.title = element_blank()
+  )
+```
+
+## Figure 11
+```{r}
+all_result <- read.csv("tb_inference_3am.csv")
+
+# remove NA plants
+no_plant <- c("Lettuce_Correct_Tray_096_Area_2_11082022", 
+              "Lettuce_Correct_Tray_0111_Area_3_11082022", 
+              "Lettuce_Correct_Tray_0160_Area_2_11082022")
+
+all_result <- all_result %>%
+  filter(!Name %in% no_plant)
+```
+
+```{r}
+patch_train <- patch %>%
+  filter(filename %in% trainset$V1)
+
+patch_train$data <- "training set"
+patch_test$data <- "test set"
+metric_area <- rbind(patch_train, patch_test)
+
+metric_area  <- metric_area %>%
+  left_join(all_result %>% select(Name, Tipburn_area), by = join_by("filename" == "Name"))
+metric_area$log_tb <- log(metric_area$Tipburn_area)
+metric_area[which(metric_area$log_tb == -Inf),"log_tb"] <- 0
+
+metric_area <- metric_area %>%
+  mutate(
+    Time = str_extract(filename, "\\d+DAS"),
+    Name = str_extract(filename, ".*(?=_\\d+DAS)"),
+  )
+
+metric_area$data <- factor(
+  metric_area$data,
+  levels = c("training set", "test set")
+)
+
+ggplot(metric_area , aes(log_tb, dice)) +
+  geom_point(alpha = 0.65, size = 2) + 
+  facet_wrap(~data) +
+  labs(
+    x = "log(Tipburn area)",
+    y = "Dice Score"
+  ) + 
+  theme_minimal() +
+  theme(
+    panel.spacing = unit(1.2, "lines"),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8)
+  )
+
+ggplot(metric_area , aes(Time, dice)) +
+  geom_boxplot(width = 0.5) + 
+  facet_wrap(~data) +
+  labs(
+    x = "Time",
+    y = "Dice Score"
+  ) + 
+  theme_minimal() +
+  theme(
+    panel.spacing = unit(1.2, "lines"),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8)
+  )
+
+```
+
+# Image-derived Quantitative Phenotypes for Tipburn 
+## Figure 12
+```{r}
+# Plant area
+p_area <- ggplot(all_result, aes(x = Time, y = Plant_area)) +
+  stat_halfeye(
+    adjust = 0.5,
+    justification = -0.2,
+    .width = 0,
+    point_colour = NA
+  ) +
+  geom_boxplot(
+    width = 0.12,
+    outlier.shape = 16,
+    outlier.size = 1
+  ) +
+  labs(
+    y = "Pixel count"
+  ) +
+  theme_minimal() 
+
+all_result$log_Tipburn_area <- log(all_result$Tipburn_area)
+logtb_inf <- which(all_result$log_Tipburn_area == -Inf)
+all_result$log_Tipburn_area[logtb_inf] <- 0 
+
+# Tipburn area
+p_tb <- ggplot(all_result, aes(x = Time, y = Tipburn_area)) +
+  stat_halfeye(
+    adjust = 0.5,
+    justification = -0.2,
+    .width = 0,
+    point_colour = NA
+  ) +
+  geom_boxplot(
+    width = 0.12,
+    outlier.shape = 16,
+    outlier.size = 1
+  ) +
+    labs(
+    y = "Pixel count"
+  ) +
+    theme_minimal() 
+
+# log(Tipburn area)
+p_logtb <- ggplot(all_result, aes(x = Time, y = log_Tipburn_area)) +
+  stat_halfeye(
+    adjust = 0.5,
+    justification = -0.2,
+    .width = 0,
+    point_colour = NA
+  ) +
+  geom_boxplot(
+    width = 0.12,
+    outlier.shape = 16,
+    outlier.size = 1
+  ) +
+    labs(
+    y = "Pixel count (log-transformed)"
+  ) +
+      theme_minimal() 
+
+
+p_area  <- p_area  + labs(title = "Plant area") + theme(plot.title = element_text(hjust = 0.5))
+p_tb    <- p_tb    + labs(title = "Tipburn area") + theme(plot.title = element_text(hjust = 0.5))
+p_logtb <- p_logtb + labs(title = "log(Tipburn area)") + theme(plot.title = element_text(hjust = 0.5))
+
+(p_area | p_tb | p_logtb) +
+  plot_layout(guides = "collect") &
+  theme(
+    legend.position = "bottom",
+    plot.title.position = "plot",
+    plot.margin = margin(5.5, 5.5, 5.5, 5.5)
+  )
+
+```
+
+## Figure 13
+```{r}
+df <- read.csv("tb_inference_3am.csv")
+
+# remove no plant 
+no_plant <- c("Lettuce_Correct_Tray_096_Area_2_11082022", 
+              "Lettuce_Correct_Tray_0111_Area_3_11082022", 
+              "Lettuce_Correct_Tray_0160_Area_2_11082022")
+
+df <- df %>%
+  filter(!Name %in% no_plant)
+
+# add ID
+df <- df %>%
+  left_join(data %>% select(PlantName, LK.ID), join_by(Name == PlantName)) %>%
+  left_join(info %>% select(LK.ID, Continentalish.region), join_by( LK.ID)) 
+
+# Plant area
+mat <- df %>%
+  mutate(Time = factor(Time, levels = c("21DAS","20DAS","19DAS","18DAS","17DAS","16DAS"))) %>% 
+  select(Name, Time, Plant_area) %>%
+  pivot_wider(names_from = Name, values_from = Plant_area) %>%
+  arrange(Time) %>%
+  column_to_rownames("Time") %>%
+  as.matrix()
+
+# prepare heatmap
+anno_col <- df %>%
+  select(Name, Continentalish.region) %>%
+  distinct() %>%
+  tibble::column_to_rownames("Name")
+
+ord <- order(anno_col$Continentalish.region)
+mat <- mat[, ord]
+anno_col <- anno_col[ord, , drop = FALSE]
+
+regions <- unique(anno_col$Continentalish.region)
+
+ord_list <- lapply(regions, function(r) {
+  cols_r <- rownames(anno_col)[anno_col$Continentalish.region == r]
+  
+  # if there is only one plant per region, no cluster
+  if (length(cols_r) <= 1) return(cols_r)
+  
+  hc <- hclust(dist(t(mat[, cols_r, drop = FALSE])), method = "complete")
+  cols_r[hc$order]
+})
+
+ord <- unlist(ord_list)
+
+region_sizes <- sapply(regions, function(r) sum(anno_col$Continentalish.region == r))
+gaps <- cumsum(region_sizes)
+gaps <- gaps[-length(gaps)]
+
+time_order <- c("21DAS","20DAS","19DAS","18DAS","17DAS","16DAS")
+mat2 <- mat[time_order, ord, drop = FALSE]
+anno2 <- anno_col[ord, , drop = FALSE]
+anno2 <- anno2 %>%
+  mutate(Continentalish.region = if_else(Continentalish.region == "", "Unknown", Continentalish.region))
+colnames(anno2) <- "Region"
+
+region_colors <- c(
+  "Unknown"               = "#B0B0B0",
+  "Central Asia"   = "#F28E2B",  # muted orange
+  "East Africa"    = "#76B7B2",  # teal
+  "Europe"         = "#4E79A7",  # muted blue
+  "Other"          = "#9C755F",  # brownish
+  "Southern Asia"  = "#EDC948",  # muted yellow
+  "Western Asia"   = "#59A14F"   # muted green
+)
+
+anno_colors <- list(
+  Continentalish.region = region_colors
+)
+
+# heatmap 
+pheatmap(
+  mat2,
+  color = viridis(100, option = "magma"),
+  annotation_col = anno2,
+  annotation_colors = anno_colors,
+  cluster_cols = FALSE,
+  cluster_rows = FALSE,
+  gaps_col = gaps,
+  show_colnames = FALSE
+)
+
+
+# log_Tipburn area
+df$log_Tipburn_area <- log(df$Tipburn_area)
+logtb_inf <- which(df$log_Tipburn_area == -Inf)
+df$log_Tipburn_area[logtb_inf] <- 0 
+
+mat <- df %>%
+  mutate(Time = factor(Time, levels = c("21DAS","20DAS","19DAS","18DAS","17DAS","16DAS"))) %>% 
+  select(Name, Time, log_Tipburn_area) %>%
+  pivot_wider(names_from = Name, values_from = log_Tipburn_area) %>%
+  arrange(Time) %>%
+  column_to_rownames("Time") %>%
+  as.matrix()
+
+
+# prepare heatmap
+anno_col <- df %>%
+  select(Name, Continentalish.region) %>%
+  distinct() %>%
+  tibble::column_to_rownames("Name")
+
+ord <- order(anno_col$Continentalish.region)
+mat <- mat[, ord]
+anno_col <- anno_col[ord, , drop = FALSE]
+
+regions <- unique(anno_col$Continentalish.region)
+
+ord_list <- lapply(regions, function(r) {
+  cols_r <- rownames(anno_col)[anno_col$Continentalish.region == r]
+  
+  # if there is only one plant per region, no cluster
+  if (length(cols_r) <= 1) return(cols_r)
+  
+  hc <- hclust(dist(t(mat[, cols_r, drop = FALSE])), method = "complete")
+  cols_r[hc$order]
+})
+
+ord <- unlist(ord_list)
+
+region_sizes <- sapply(regions, function(r) sum(anno_col$Continentalish.region == r))
+gaps <- cumsum(region_sizes)
+gaps <- gaps[-length(gaps)]
+
+time_order <- c("21DAS","20DAS","19DAS","18DAS","17DAS","16DAS")
+mat2 <- mat[time_order, ord, drop = FALSE]
+anno2 <- anno_col[ord, , drop = FALSE]
+anno2 <- anno2 %>%
+  mutate(Continentalish.region = if_else(Continentalish.region == "", "Unknown", Continentalish.region))
+colnames(anno2) <- "Region"
+
+region_colors <- c(
+  "Unknown"               = "#B0B0B0",
+  "Central Asia"   = "#F28E2B",  # muted orange
+  "East Africa"    = "#76B7B2",  # teal
+  "Europe"         = "#4E79A7",  # muted blue
+  "Other"          = "#9C755F",  # brownish
+  "Southern Asia"  = "#EDC948",  # muted yellow
+  "Western Asia"   = "#59A14F"   # muted green
+)
+
+anno_colors <- list(
+  Continentalish.region = region_colors
+)
+
+# heatmap 
+pheatmap(
+  mat2,
+  color = viridis(100, option = "magma"),
+  annotation_col = anno2,
+  annotation_colors = anno_colors,
+  cluster_cols = FALSE,
+  cluster_rows = FALSE,
+  gaps_col = gaps,
+  show_colnames = FALSE
+)
+```
+
+## Figure 14
+```{r}
+df_21 <- df %>%
+  filter(Time == "21DAS") 
+
+quantile(df_21$Tipburn_area)
+
+df_21_G1 <- df_21 %>%
+  filter(Tipburn_area < 229) %>%
+  pull(Name)
+
+df_21_G2 <- df_21 %>%
+  filter(Tipburn_area >= 229 & Tipburn_area < 484) %>%
+  pull(Name)
+
+df_21_G3 <- df_21 %>%
+  filter(Tipburn_area >= 484 & Tipburn_area < 885) %>%
+  pull(Name)
+
+df_21_G4 <- df_21 %>%
+  filter(Tipburn_area >= 885) %>%
+  pull(Name)
+
+df <- df %>%
+   mutate(
+    Group = case_when(
+      Name %in% df_21_G1 ~ "G1",
+      Name %in% df_21_G2 ~ "G2",
+      Name %in% df_21_G3 ~ "G3",
+      Name %in% df_21_G4 ~ "G4",
+    )
+  )
+
+g1 <- ggplot(df %>% filter(Group == "G1"), aes(x = Time, y = Tipburn_area, group = Name)) + 
+  geom_line(alpha = 0.6) + theme_minimal() 
+
+g2 <- ggplot(df %>% filter(Group == "G2"), aes(x = Time, y = Tipburn_area, group = Name)) + 
+  geom_line(alpha = 0.6) + theme_minimal() 
+
+g3 <- ggplot(df %>% filter(Group == "G3"), aes(x = Time, y = Tipburn_area, group = Name)) + 
+  geom_line(alpha = 0.6) + theme_minimal() 
+
+g4 <- ggplot(df %>% filter(Group == "G4"), aes(x = Time, y = Tipburn_area, group = Name)) + 
+  geom_line(alpha = 0.6) + theme_minimal() 
+
+
+g1  <- g1  + labs(title = "Low Tipburn (Q1: 0–25%)") + theme(plot.title = element_text(hjust = 0.5))
+g2  <- g2  + labs(title = "Moderate-Low Tipburn (Q2: 25–50%)") + theme(plot.title = element_text(hjust = 0.5))
+g3  <- g3  + labs(title = "Moderate-High Tipburn (Q3: 50–75%)") + theme(plot.title = element_text(hjust = 0.5))
+g4  <- g4  + labs(title = "High Tipburn (Q4: 75–100%)") + theme(plot.title = element_text(hjust = 0.5))
+
+(g1 | g2) / (g3 | g4) +
+  plot_layout(guides = "collect")
+```
+
+## Figure 15
+```{r}
+# prepare dataset
+df_wide <- df %>%
+  arrange(LK.ID, Time) %>%
+  group_by(LK.ID, Time) %>%
+  mutate(rep_id = paste0("rep", row_number())) %>%
+  ungroup() %>%
+  tidyr::pivot_wider(
+    id_cols = c(LK.ID, Time),
+    names_from = rep_id,
+    values_from = Tipburn_area
+  )
+
+rep4 <- which(!is.na(df_wide[,"rep3"]))
+
+df_rep2 <- df_wide[-rep4,]
+
+# plot
+ggplot(df_rep2 %>% filter(Time == "21DAS"), aes(x = rep1, y = rep2)) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, color = "blue") +
+  scale_x_continuous(
+    limits = c(0, 5000),
+    breaks = seq(0, 5000, by = 1000),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 5000),
+    breaks = seq(0, 5000, by = 1000),
+    expand = c(0, 0)
+  ) +
+  theme_minimal() +
+  labs(x = "Replicate 1",
+       y = "Replicate 2") +
+  theme(
+    panel.spacing = unit(1.2, "lines"),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8),
+    plot.margin = margin(10, 20, 10, 10)
+  )+ coord_equal()
+
+```
+
+## Figure 17
+```{r}
+# prepare dataset
+df_max <- df %>%
+  group_by(LK.ID, Time) %>%
+  slice_max(Tipburn_area, n = 1, with_ties = FALSE) %>%
+  ungroup() 
+
+df_max_21 <- df_max %>%
+  filter(Time == "21DAS")
+
+# log_tb
+df_max_21$log_tb <- log(df_max_21$Tipburn_area)
+df_max_21[which(df_max_21$log_tb == -Inf),"log_tb"] <- 0
+
+ggplot(df_max_21, aes(x = log_tb)) +
+  geom_histogram(
+    bins = 30,
+    fill = "grey",
+    color = "black",
+    linewidth = 0.5
+  ) +
+  labs(
+    x = "logTA",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 14)
+
+# res
+model <- lm(Tipburn_area ~ Plant_area, df_max_21)
+df_max_21$Res <- model$residuals
+
+ggplot(df_max_21, aes(x = Res)) +
+  geom_histogram(
+    bins = 30,
+    fill = "grey",
+    color = "black",
+    linewidth = 0.5
+  ) +
+  labs(
+    x = "ResTA",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+# Genome-Wide Association Analysis of Tipburn
+## Figure 18
+### logTA
+```{r}
+result_GWAS <- read_table("LD5_21DAS_maxtb_v1_cleanchr_log_tb.assoc.txt")
+
+result_GWAS <- result_GWAS[startsWith(result_GWAS$chr, "NC_05"),]
+result_GWAS <- result_GWAS %>%
+  left_join(chr_map, by = c("chr" = "chromosome_ID")) %>%
+  mutate(chr = parse_number(Chrom))
+
+### prepare dataset
+gwas <- result_GWAS %>%
+  rename(CHR = chr, BP = ps, SNP = rs, P = p_wald) %>%
+  mutate(
+    CHR = as.character(CHR),
+    CHR = ifelse(CHR %in% c("X","Y"), CHR, as.numeric(CHR)),
+    CHR = as.factor(CHR)
+  ) %>%
+  arrange(CHR, BP) %>%
+  group_by(CHR) %>%
+  mutate(chr_len = max(BP)) %>%
+  ungroup() %>%
+  mutate(tot = cumsum(as.numeric(chr_len)) - chr_len) %>%
+  mutate(BP_cum = BP + tot) %>%
+  group_by(CHR) %>%
+  mutate(center = mean(BP_cum)) %>%
+  ungroup() %>%
+  mutate(logP = -log10(P))
+
+logtb <- ggplot(subset(gwas, logP >= 2), aes(x = BP_cum, y = logP, color = as.factor(as.numeric(CHR) %% 2))) +
+  geom_point(alpha = 0.7, size = 0.8) +
+  scale_color_manual(values = c("grey30", "grey60"), guide = "none") +
+  scale_x_continuous(
+    label = levels(gwas$CHR),
+    breaks = gwas %>% group_by(CHR) %>% summarise(center = mean(center)) %>% pull(center)
+  ) +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+ggsave("Manhattan_21DAS_maxtb_logtb.png", plot = logtb, width = 15, height = 5, dpi = 300)
+```
+### ResTA
+```{r}
+result_GWAS <- read_table("LD5_21DAS_maxtb_v1_cleanchr_res.assoc.txt")
+
+result_GWAS <- result_GWAS[startsWith(result_GWAS$chr, "NC_05"),]
+result_GWAS <- result_GWAS %>%
+  left_join(chr_map, by = c("chr" = "chromosome_ID")) %>%
+  mutate(chr = parse_number(Chrom))
+
+### prepare dataset
+gwas <- result_GWAS %>%
+  rename(CHR = chr, BP = ps, SNP = rs, P = p_wald) %>%
+  mutate(
+    CHR = as.character(CHR),
+    CHR = ifelse(CHR %in% c("X","Y"), CHR, as.numeric(CHR)),
+    CHR = as.factor(CHR)
+  ) %>%
+  arrange(CHR, BP) %>%
+  group_by(CHR) %>%
+  mutate(chr_len = max(BP)) %>%
+  ungroup() %>%
+  mutate(tot = cumsum(as.numeric(chr_len)) - chr_len) %>%
+  mutate(BP_cum = BP + tot) %>%
+  group_by(CHR) %>%
+  mutate(center = mean(BP_cum)) %>%
+  ungroup() %>%
+  mutate(logP = -log10(P))
+
+Res <- ggplot(subset(gwas, logP >= 2), aes(x = BP_cum, y = logP, color = as.factor(as.numeric(CHR) %% 2))) +
+  geom_point(alpha = 0.7, size = 0.8) +
+  scale_color_manual(values = c("grey30", "grey60"), guide = "none") +
+  scale_x_continuous(
+    label = levels(gwas$CHR),
+    breaks = gwas %>% group_by(CHR) %>% summarise(center = mean(center)) %>% pull(center)
+  ) +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+ggsave("Manhattan_21DAS_maxtb_res.png", plot = Res, width = 15, height = 5, dpi = 300)
+```
+
+
+## Figure 19
+### ResTA
+```{r}
+raw_geno <- fread("region_ch5_172_4_50kb_snp.raw")
+lead_snp_col <- colnames(raw_geno)[
+  grepl("^NC_056627.1:172476278", colnames(raw_geno))
+]
+
+plot_data <- data.frame(
+  ID = raw_geno$IID,
+  Genotype = as.factor(raw_geno[[lead_snp_col]])
+)
+
+pheno <- read.table("21DAS_3IQR_maxtb.pheno", header = TRUE)
+plot_data_pheno <- plot_data %>%
+  left_join(pheno, by = c("ID" = "ID")) %>%
+  left_join(info %>% select(LK.ID, Continentalish.region), by = c("ID" = "LK.ID")) %>%
+  dplyr::filter(!is.na(Genotype))
+
+plot_data_pheno$Genotype <- as.factor(plot_data_pheno$Genotype)
+
+ggplot(plot_data_pheno, aes(x = Genotype, y = res)) +
+  geom_boxplot(outlier.shape = NA, color = "grey30", fill = "grey97", width = 0.5, size = 0.7) +
+  geom_jitter(width = 0.1, size = 2, alpha = 0.5, color = "black") +
+  labs(
+    x = "Allele",
+    y = "ResTA"
+  ) +
+  theme_minimal() 
+```
+### logTA
+```{r}
+raw_geno <- fread("region_ch5_204_50kb.raw")
+lead_snp_col <- colnames(raw_geno)[
+  grepl("^NC_056627.1:204847132", colnames(raw_geno))
+]
+
+plot_data <- data.frame(
+  ID = raw_geno$IID,
+  Genotype = as.factor(raw_geno[[lead_snp_col]])
+)
+
+pheno <- read.table("21DAS_3IQR_maxtb.pheno", header = TRUE)
+plot_data_pheno <- plot_data %>%
+  left_join(pheno, by = c("ID" = "ID")) %>%
+  left_join(info %>% select(LK.ID, Continentalish.region), by = c("ID" = "LK.ID")) %>%
+  dplyr::filter(!is.na(Genotype))
+
+plot_data_pheno$Genotype <- as.factor(plot_data_pheno$Genotype)
+
+ggplot(plot_data_pheno, aes(x = Genotype, y = log_tb)) +
+  geom_boxplot(outlier.shape = NA, color = "grey30", fill = "grey97", width = 0.5, size = 0.7) +
+  geom_jitter(width = 0.1, size = 2, alpha = 0.5, color = "black") +
+  labs(
+    x = "Allele",
+    y = "logTA"
+  ) +
+  theme_minimal() 
+```
+## Figure 20
+### ResTA_172
+```{r}
+ld_df <- fread("ld_result_chr5_172Mb_6Mb.ld")
+lead_pos <- 172476278
+lead_snp_col <- "NC_056627.1:172476278"
+
+ggplot(ld_df, aes(x = BP_B/10^6, y = R2)) +
+  geom_point(alpha = 0.5, color = "grey50") +
+  geom_vline(xintercept = lead_pos/10^6, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = 0.2, color = "darkgreen", linetype = "dotted", size = 1) +
+  coord_cartesian(xlim = c((lead_pos - 700000)/10^6, (lead_pos + 4000000)/10^6)) +
+  labs(title = "LD Block (172Mb Region)",
+       x = "Position (Mb)", y = "LD (R-squared)") +
+  theme_minimal()
+```
+### logTA_204
+```{r}
+ld_df <- fread("ld_result_chr5_204Mb_1Mb.ld")
+lead_pos <- 204847132
+
+ggplot(ld_df, aes(x = BP_B/10^6, y = R2)) +
+  geom_point(alpha = 0.5, color = "grey50") +
+  geom_vline(xintercept = lead_pos/10^6, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = 0.2, color = "darkgreen", linetype = "dotted", size = 1) +
+  coord_cartesian(xlim = c((lead_pos - 1000000)/10^6, (lead_pos + 1000000)/10^6)) +
+  labs(title = "LD Block (204Mb Region)",
+       x = "Position (Mb)", y = "LD (R-squared)") +
+  theme_minimal()
+```
+
+## Figure 21
+```{r}
+ld_df <- fread("ld_result_sativa_chr5_204Mb_5Mb.ld")
+lead_pos <- 204847132
+
+ggplot(ld_df, aes(x = BP_B/10^6, y = R2)) +
+  geom_point(alpha = 0.5, color = "grey50") +
+  geom_vline(xintercept = lead_pos/10^6, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = 0.2, color = "darkgreen", linetype = "dotted", size = 1) +
+  coord_cartesian(xlim = c((lead_pos - 1000000)/10^6, (lead_pos + 1000000)/10^6)) +
+  labs(title = "LD Block (L. sativa 204.8Mb Region)",
+       x = "Position (Mb)", y = "LD (R-squared)") +
+  theme_minimal()
+```
+
+# Appendix
+## Appendix 1
+
+## Appendix 2
+### prepare dataset
+```{r}
+result_GWAS <- read_table("LD5_21DAS_maxtb_v1_cleanchr_log_tb.assoc.txt")
+
+result_GWAS <- result_GWAS[startsWith(result_GWAS$chr, "NC_05"),]
+result_GWAS <- result_GWAS %>%
+  left_join(chr_map, by = c("chr" = "chromosome_ID")) %>%
+  mutate(chr = parse_number(Chrom))
+
+gwas <- result_GWAS %>%
+  rename(CHR = chr, BP = ps, SNP = rs, P = p_wald) %>%
+  mutate(
+    CHR = as.character(CHR),
+    CHR = ifelse(CHR %in% c("X","Y"), CHR, as.numeric(CHR)),
+    CHR = as.factor(CHR)
+  ) %>%
+  arrange(CHR, BP) %>%
+  group_by(CHR) %>%
+  mutate(chr_len = max(BP)) %>%
+  ungroup() %>%
+  mutate(tot = cumsum(as.numeric(chr_len)) - chr_len) %>%
+  mutate(BP_cum = BP + tot) %>%
+  group_by(CHR) %>%
+  mutate(center = mean(BP_cum)) %>%
+  ungroup() %>%
+  mutate(logP = -log10(P))
+```
+
+# zoom in: logTA (chr5)
+```{r}
+gwas_chr5 <- gwas %>%
+  filter(CHR == 5)
+
+target_chr <- 5
+lead_snp_pos <- 204847132
+zoom_window <- 1000000 
+
+# only chr5
+chr_data <- gwas %>%
+  filter(CHR == target_chr)
+
+start_pos <- lead_snp_pos - zoom_window
+end_pos <- lead_snp_pos + zoom_window
+
+zoom_data <- chr_data %>%
+  filter(BP >= start_pos & BP <= end_pos)
+
+p_zoom <- ggplot(zoom_data, aes(x = BP, y = logP)) +
+  geom_point(color = "grey40", alpha = 0.9, size = 1.5) +
+  geom_point(data = subset(zoom_data, BP == lead_snp_pos), 
+             color = "red", size = 4, shape = 18) +
+  scale_x_continuous(
+    labels = function(x) x / 1e6, 
+    name = "Position (Mb)",
+    limits = c(start_pos, end_pos)
+  labs(y = expression(-log[10](P)), 
+       title = paste0("Zoom-in: Chr 5 Peak (", round(start_pos/1e6, 1), "-", round(end_pos/1e6, 1), " Mb)")) +
+  theme_bw(base_size = 14) +
+  theme(panel.grid.minor = element_blank())
+
+p_zoom
+```
+
+# zoom in: logTA (chr7)
+```{r}
+gwas_chr7 <- gwas %>%
+  filter(CHR == 7)
+
+target_chr <- 7
+lead_snp_pos <- 39658720
+zoom_window <- 1000000 
+
+# only chr7
+chr_data <- gwas %>%
+  filter(CHR == target_chr)
+
+start_pos <- lead_snp_pos - zoom_window
+end_pos <- lead_snp_pos + zoom_window
+
+zoom_data <- chr_data %>%
+  filter(BP >= start_pos & BP <= end_pos)
+
+p_zoom <- ggplot(zoom_data, aes(x = BP, y = logP)) +
+  geom_point(color = "grey40", alpha = 0.9, size = 1.5) +
+  geom_point(data = subset(zoom_data, BP == lead_snp_pos), 
+             color = "red", size = 4, shape = 18) +
+  scale_x_continuous(
+    labels = function(x) x / 1e6, 
+    name = "Position (Mb)",
+    limits = c(start_pos, end_pos)
+  ) +
+  labs(y = expression(-log[10](P)), 
+       title = paste0("Zoom-in: Chr 7 Peak (", round(start_pos/1e6, 1), "-", round(end_pos/1e6, 1), " Mb)")) +
+  theme_bw(base_size = 14) +
+  theme(panel.grid.minor = element_blank())
+
+p_zoom
+```
+
+## Appendix 4
+```{r}
+result_GWAS <- read_table("iTB_quant_sat_2_33.gwas.res.tsv")
+# result_GWAS <- read_table("BF_mean_itb.gwas.res.tsv")
+# result_GWAS <- read_table("TK_mean_itb.gwas.res.tsv")
+
+# prepare dataset
+gwas <- result_GWAS %>%
+  rename(CHR = CHR, BP = END, SNP = ID, P = pval) %>%
+  mutate(
+    CHR = as.character(CHR),
+    CHR = ifelse(CHR %in% c("X","Y"), CHR, as.numeric(CHR)),
+    CHR = as.factor(CHR)
+  ) %>%
+  arrange(CHR, BP) %>%
+  group_by(CHR) %>%
+  mutate(chr_len = max(BP)) %>%
+  ungroup() %>%
+  mutate(tot = cumsum(as.numeric(chr_len)) - chr_len) %>%
+  mutate(BP_cum = BP + tot) %>%
+  group_by(CHR) %>%
+  mutate(center = mean(BP_cum)) %>%
+  ungroup() %>%
+  mutate(logP = -log10(P))
+
+# threshold
+n_snp <- nrow(gwas)
+bonf <- 0.05 / n_snp
+bonf_line <- -log10(bonf)
+
+sativa <- ggplot(subset(gwas, logP >= 1), aes(x = BP_cum, y = logP, color = as.factor(as.numeric(CHR) %% 2))) +
+  geom_point(alpha = 0.7, size = 0.8) +
+  scale_color_manual(values = c("grey30", "grey60"), guide = "none") +
+  geom_point(
+    data = subset(gwas, logP >= bonf_line),
+    color = "red",
+    size = 1
+  ) +
+  scale_x_continuous(
+    label = levels(gwas$CHR),
+    breaks = gwas %>% group_by(CHR) %>% summarise(center = mean(center)) %>% pull(center)
+  ) +
+  geom_hline(yintercept = bonf_line, linetype = "dashed", color = "red") +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+ggsave("Manhattan_iTB_quant_sat.png", plot = sativa, width = 15, height = 5, dpi = 300)
+```
+
+## Appendix 6
+```{r}
+# prepare dataset
+rank_data <- df_rep2 %>%
+  filter(Time == "21DAS") %>%
+  select(LK.ID, rep1, rep2) %>%
+  pivot_longer(cols = c(rep1, rep2),
+               names_to = "Trait",
+               values_to = "Value") %>%
+  group_by(Trait) %>%
+  mutate(Percentile = percent_rank(Value) * 100) %>%
+  ungroup() %>%
+  mutate(
+    Trait = factor(Trait, levels = c("rep1", "rep2")),
+    LK.ID = factor(LK.ID, levels = sort(unique(LK.ID)))
+  )
+
+order_ids <- rank_data %>%
+  filter(Trait == "rep1") %>%
+  arrange(Percentile) %>%
+  pull(LK.ID)
+
+rank_data <- rank_data %>%
+  mutate(LK.ID = factor(LK.ID, levels = order_ids))
+
+ggplot(rank_data, aes(x = Trait, y = Percentile, group = LK.ID)) +
+  geom_line(alpha = 0.35, color = "gray50") +
+  geom_point(alpha = 0.6, size = 1.5, color = "steelblue") +
+  labs(
+    title = "LK.ID rank movement across replicates (21DAS)",
+    subtitle = "Each line represents one LK.ID",
+    x = "Replicate",
+    y = "Percentile rank"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
+  )
+```
