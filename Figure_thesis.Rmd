@@ -893,6 +893,47 @@ ggplot(ld_df, aes(x = BP_B/10^6, y = R2)) +
 
 # Appendix
 ## Appendix 1
+```{r}
+library(CMplot)
+
+LD5 <- read.table("LKser_bed_files_filtered_LD5kb_v2.bim", header = FALSE)
+# LD5 <- read.table("LKser_bed_filtered_v1_ID_clean.bim", header = FALSE)
+colnames(LD5) <- c("chromosome_ID", "SNP_ID", "cM", "position", "allele1", "allele2")
+
+# add chromosome num
+chroms <- LD5$chromosome_ID[startsWith(LD5$chromosome_ID, "NC_05")]
+chroms_ID <- unique(chroms)
+chr_map <- data.frame(chromosome_ID = chroms_ID , Chrom = paste0("Chr", 1:9))
+
+# select only chromsomes set
+LD5 <- LD5[startsWith(LD5$chromosome_ID, "NC_05"),]
+LD5 <- LD5 %>%
+  left_join(chr_map, by = "chromosome_ID")
+
+## draw chromosome plot
+map_5 <- LD5 %>%
+  select(SNP = SNP_ID,
+         chr = Chrom,
+         pos = position) %>%
+  mutate(
+    chr = as.numeric(gsub("Chr", "", chr)),  # CMplot 要數字
+    pos = as.numeric(pos)
+  )
+
+mycols <- viridis::viridis(3)
+CMplot(map_5,
+       plot.type = "d",
+       bin.size = 1e6,
+       chr.den.col = mycols,
+       file = "jpg",
+       file.name = "LD5kb_vir",
+       dpi = 300,
+       main = "",
+       file.output = TRUE,
+       verbose = TRUE,
+       width = 9,
+       height = 6)
+```
 
 ## Appendix 2
 ### prepare dataset
